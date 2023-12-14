@@ -1,27 +1,16 @@
 package org.matsim.prepare;
 
-import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.GeometryFactory;
 import org.matsim.api.core.v01.Identifiable;
 import org.matsim.api.core.v01.TransportMode;
-import org.matsim.api.core.v01.network.Network;
-import org.matsim.api.core.v01.network.Node;
-import org.matsim.api.core.v01.population.*;
+import org.matsim.api.core.v01.population.Leg;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
-import org.matsim.core.network.SearchableNetwork;
-import org.matsim.core.population.PopulationUtils;
 import org.matsim.core.population.io.StreamingPopulationReader;
 import org.matsim.core.population.io.StreamingPopulationWriter;
-import org.matsim.core.population.routes.GenericRouteImpl;
-import org.matsim.core.population.routes.NetworkRoute;
 import org.matsim.core.scenario.ScenarioUtils;
-import org.matsim.core.utils.collections.QuadTree;
-import org.matsim.core.utils.geometry.geotools.MGC;
 
-import java.util.*;
+import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Stream;
 
 public class PrepareRustQSimScenario {
 
@@ -73,7 +62,7 @@ public class PrepareRustQSimScenario {
             writer25pct.writePerson(person);
             personCounter.getAndIncrement();
         });
-        reader.readFile("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-v6.0-25pct.plans.xml.gz");
+        reader.readFile("/Users/janek/Documents/rust_q_sim/berlin/input/004.output_plans.xml.gz");
         writer25pct.closeStreaming();
         writer1pct.closeStreaming();
         writer01pct.closeStreaming();

@@ -2,7 +2,9 @@ package org.matsim.prepare;
 
 import org.matsim.api.core.v01.Identifiable;
 import org.matsim.api.core.v01.TransportMode;
+import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
+import org.matsim.api.core.v01.population.PlanElement;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.io.StreamingPopulationReader;
@@ -16,7 +18,14 @@ public class PrepareRustQSimScenario {
 
     public static void main(String[] args) {
 
-        var scenario = ScenarioUtils.createScenario(ConfigUtils.createConfig());
+        var config = ConfigUtils.createConfig();
+        config.network().setInputFile("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-v6.0-network-with-pt.xml.gz");
+        config.facilities().setInputFile("/Users/janek/Documents/rust_q_sim/berlin/input/004.output_facilities.xml.gz");
+        config.global().setCoordinateSystem("EPSG:25832");
+        var scenario = ScenarioUtils.loadScenario(config);
+        var net = scenario.getNetwork();
+        var facilities = scenario.getActivityFacilities();
+
         StreamingPopulationReader reader = new StreamingPopulationReader(scenario);
         StreamingPopulationWriter writer25pct = new StreamingPopulationWriter();
         writer25pct.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-25pct.plans.xml.gz");
@@ -32,13 +41,20 @@ public class PrepareRustQSimScenario {
         reader.addAlgorithm(person -> {
 
             var selectedPlan = person.getSelectedPlan();
+            for (PlanElement e : selectedPlan.getPlanElements()) {
+                if (e instanceof Activity a) {
+                    if (a.getLinkId() == null) {
+                        var facility = facilities.getFacilities().get(a.getFacilityId());
 
-            // filter out pt plans
-            var hashPt = selectedPlan.getPlanElements().stream()
-                    .filter(e -> e instanceof Leg)
-                    .map(e -> (Leg) e)
-                    .anyMatch(l -> l.getMode().equals(TransportMode.pt));
-            if (hashPt) return;
+                        System.out.println("Found Empty activity. Adding Coord: " + facility.getCoord() + " and link-id:" + facility.getLinkId() + " to activity");
+                        a.setCoord(facility.getCoord());
+                        a.setLinkId(facility.getLinkId());
+                    }
+                } else if (e instanceof Leg l) {
+                    // filter out pt plans
+                    if (l.getMode().equals(TransportMode.pt)) return;
+                }
+            }
 
             person.getPlans().clear();
             person.addPlan(selectedPlan);
@@ -68,7 +84,6 @@ public class PrepareRustQSimScenario {
         writer01pct.closeStreaming();
 
         // filter pt from network and make networks smaller for testing
-        var net = NetworkUtils.readNetwork("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-v6.0-network-with-pt.xml.gz");
         var ptLinks = net.getLinks().values().parallelStream()
                 .filter(link -> link.getAllowedModes().contains(TransportMode.pt))
                 .map(Identifiable::getId)

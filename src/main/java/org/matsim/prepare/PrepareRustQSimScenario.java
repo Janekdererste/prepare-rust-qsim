@@ -1,8 +1,6 @@
 package org.matsim.prepare;
 
-import org.geotools.geometry.jts.LiteCoordinateSequenceFactory;
 import org.locationtech.jts.geom.Coordinate;
-import org.locationtech.jts.geom.Envelope;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.matsim.api.core.v01.Identifiable;
 import org.matsim.api.core.v01.TransportMode;
@@ -13,68 +11,75 @@ import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.network.SearchableNetwork;
 import org.matsim.core.population.PopulationUtils;
+import org.matsim.core.population.io.StreamingPopulationReader;
+import org.matsim.core.population.io.StreamingPopulationWriter;
 import org.matsim.core.population.routes.GenericRouteImpl;
 import org.matsim.core.population.routes.NetworkRoute;
-import org.matsim.core.router.TripStructureUtils;
 import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.core.utils.collections.QuadTree;
-import org.matsim.core.utils.geometry.CoordUtils;
 import org.matsim.core.utils.geometry.geotools.MGC;
 
-import java.nio.channels.AcceptPendingException;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
 public class PrepareRustQSimScenario {
 
     public static void main(String[] args) {
 
-        var pop = PopulationUtils.readPopulation("/Users/janek/Documents/rust_q_sim/input/010.output_plans.xml.gz");//scenario.getPopulation(); //PopulationUtils.readPopulation("/Users/janek/projects/matsim-libs/examples/scenarios/berlin/plans_hwh_1pct.xml.gz");
-        var ptPersons = pop.getPersons().values().parallelStream()
-                .filter(p -> {
-                    var plan = p.getSelectedPlan();
-                    return plan.getPlanElements().stream()
-                            .filter(e -> e instanceof Leg)
-                            .map(e -> (Leg)e)
-                            .anyMatch(l -> l.getMode().equals(TransportMode.pt));
-                })
-                .toList();
-
-        for (var person : ptPersons) {
-            pop.removePerson(person.getId());
-        }
-
-        var population1pct = PopulationUtils.createPopulation(ConfigUtils.createConfig());
-        var population01pct = PopulationUtils.createPopulation(ConfigUtils.createConfig());
-        var populationSingle = PopulationUtils.createPopulation(ConfigUtils.createConfig());
+        var scenario = ScenarioUtils.createScenario(ConfigUtils.createConfig());
+        StreamingPopulationReader reader = new StreamingPopulationReader(scenario);
+        StreamingPopulationWriter writer25pct = new StreamingPopulationWriter();
+        writer25pct.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-25pct.plans.xml.gz");
+        StreamingPopulationWriter writer1pct = new StreamingPopulationWriter();
+        writer1pct.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-1pct.plans.xml.gz");
+        StreamingPopulationWriter writer01pct = new StreamingPopulationWriter();
+        writer01pct.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-01pct.plans.xml.gz");
+        StreamingPopulationWriter writerSingle = new StreamingPopulationWriter();
+        writerSingle.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-single.plans.xml.gz");
         var rand = new Random();
+        AtomicInteger personCounter = new AtomicInteger();
 
-        for (var person : pop.getPersons().values()) {
+        reader.addAlgorithm(person -> {
+
             var selectedPlan = person.getSelectedPlan();
+
+            // filter out pt plans
+            var hashPt = selectedPlan.getPlanElements().stream()
+                    .filter(e -> e instanceof Leg)
+                    .map(e -> (Leg) e)
+                    .anyMatch(l -> l.getMode().equals(TransportMode.pt));
+            if (hashPt) return;
+
             person.getPlans().clear();
             person.addPlan(selectedPlan);
 
-            if (populationSingle.getPersons().isEmpty()) {
-                populationSingle.addPerson(person);
+            // write the first person into the single agent file
+            if (personCounter.get() == 0) {
+                writerSingle.writePerson(person);
+                writerSingle.closeStreaming();
             }
 
-            var num = rand.nextDouble();
-            if (num >= 0.9) {
-                population1pct.addPerson(person);
+            // draw 10% sample and 1% sample (out of 10% gives 1% and 0.1% samples)
+            var randNum = rand.nextDouble();
+            if (randNum >= 0.96) {
+                writer1pct.writePerson(person);
+            }
+            if (randNum >= 0.996) {
+                writer01pct.writePerson(person);
             }
 
-            if (num >= 0.9) {
-                population01pct.addPerson(person);
-            }
-        }
-
-        PopulationUtils.writePopulation(populationSingle, "/Users/janek/Documents/rust_q_sim/input/rvr-single.plans.xml.gz");
-        PopulationUtils.writePopulation(population01pct,"/Users/janek/Documents/rust_q_sim/input/rvr-1pct.plans.xml.gz");
-        PopulationUtils.writePopulation(population1pct, "/Users/janek/Documents/rust_q_sim/input/rvr-01pct.plans.xml.gz");
-        PopulationUtils.writePopulation(pop, "/Users/janek/Documents/rust_q_sim/input/rvr.plans.xml.gz");
+            // write all persons with only selected plan to 10% sample
+            writer25pct.writePerson(person);
+            personCounter.getAndIncrement();
+        });
+        reader.readFile("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-v6.0-25pct.plans.xml.gz");
+        writer25pct.closeStreaming();
+        writer1pct.closeStreaming();
+        writer01pct.closeStreaming();
 
         // filter pt from network and make networks smaller for testing
-        var net = NetworkUtils.readNetwork("/Users/janek/Documents/rust_q_sim/input/010.output_network.xml.gz");
+        var net = NetworkUtils.readNetwork("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-v6.0-network-with-pt.xml.gz");
         var ptLinks = net.getLinks().values().parallelStream()
                 .filter(link -> link.getAllowedModes().contains(TransportMode.pt))
                 .map(Identifiable::getId)
@@ -91,53 +96,6 @@ public class PrepareRustQSimScenario {
             net.removeNode(node);
         }
 
-        NetworkUtils.writeNetwork(cutNetwork(populationSingle, net), "/Users/janek/Documents/rust_q_sim/input/rvr-single.network.xml.gz");
-        NetworkUtils.writeNetwork(cutNetwork(population01pct, net), "/Users/janek/Documents/rust_q_sim/input/rvr-01pct.network.xml.gz");
-        NetworkUtils.writeNetwork(cutNetwork(population1pct, net), "/Users/janek/Documents/rust_q_sim/input/rvr-1pct.network.xml.gz");
-        NetworkUtils.writeNetwork(net, "/Users/janek/Documents/rust_q_sim/input/rvr.network.xml.gz");
-    }
-
-    private static Network cutNetwork(Population pop, Network net) {
-        var bbox = boundingBox(pop, net);
-        var bboxNodes = new HashSet<Node>();
-        ((SearchableNetwork)net).getNodeQuadTree().getRectangle(bbox, bboxNodes);
-        return net.getLinks().values().parallelStream()
-                .filter(link -> bboxNodes.contains(link.getFromNode()))
-                .filter(link -> bboxNodes.contains(link.getToNode()))
-                .collect(NetworkUtils.getCollector());
-    }
-
-    private static QuadTree.Rect boundingBox(Population pop, Network network) {
-
-        var coordinats = pop.getPersons().values().stream()
-                .flatMap(p -> getNodes(p.getSelectedPlan(), network))
-                .toArray(Coordinate[]::new);
-
-        var linearRing = new GeometryFactory().createLineString(coordinats);
-        return new QuadTree.Rect(
-                linearRing.getEnvelopeInternal().getMinX(),
-                linearRing.getEnvelopeInternal().getMinY(),
-                linearRing.getEnvelopeInternal().getMaxX(),
-                linearRing.getEnvelopeInternal().getMaxY()
-        );
-    }
-
-    private static Stream<Coordinate> getNodes(Plan plan, Network network) {
-
-        return plan.getPlanElements().stream()
-                .filter(e -> e instanceof Leg)
-                .map(e -> (Leg) e)
-                .flatMap(leg -> {
-                    if (leg.getRoute() instanceof NetworkRoute nr) {
-                        return nr.getLinkIds().stream();
-                    } else if (leg.getRoute() instanceof GenericRouteImpl gr) {
-                        return Stream.of(gr.getStartLinkId(), gr.getEndLinkId());
-                    } else {
-                        return Stream.empty();
-                    }
-                })
-                .map(id -> network.getLinks().get(id))
-                .flatMap(link -> Stream.of(link.getFromNode().getCoord(), link.getToNode().getCoord()))
-                .map(MGC::coord2Coordinate);
+        NetworkUtils.writeNetwork(net, "/Users/janek/Documents/rust_q_sim/berlin/input/berlin.network.xml.gz");
     }
 }

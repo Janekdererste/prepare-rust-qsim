@@ -1,6 +1,9 @@
 package org.matsim.prepare;
 
+
+import com.beust.jcommander.Parameter;
 import org.matsim.api.core.v01.Identifiable;
+import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
@@ -10,78 +13,75 @@ import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.io.StreamingPopulationReader;
 import org.matsim.core.population.io.StreamingPopulationWriter;
 import org.matsim.core.scenario.ScenarioUtils;
+import org.matsim.facilities.ActivityFacilities;
 
+import java.nio.file.Path;
+import java.util.List;
 import java.util.Random;
-import java.util.concurrent.atomic.AtomicInteger;
 
 public class PrepareRustQSimScenario {
 
+
+    public static class InputArgs {
+
+        @Parameter(names = "-n", required = true)
+        public Path network;
+
+        @Parameter(names = "-p", required = true)
+        public Path population;
+
+        @Parameter(names = "-f")
+        public Path facilities;
+
+        @Parameter(names = "-o", required = true)
+        public Path outputDirectory;
+
+        @Parameter(names = "-r", required = true)
+        public String runId;
+
+        @Parameter(names = "-s")
+        public double sampleSize = 0.1;
+
+        @Parameter(names = "-ts")
+        public List<Double> targetSampleSizes = List.of(0.1, 0.01, 0.001);
+    }
+
+    public record SampledWriter(double propability, StreamingPopulationWriter writer){}
+
     public static void main(String[] args) {
 
+        var inputArgs = new InputArgs();
+
+        com.beust.jcommander.JCommander.newBuilder()
+                .addObject(inputArgs)
+                .build()
+                .parse(args);
+
         var config = ConfigUtils.createConfig();
-        config.network().setInputFile("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-v6.0-network-with-pt.xml.gz");
-        config.facilities().setInputFile("/Users/janek/Documents/rust_q_sim/berlin/input/004.output_facilities.xml.gz");
+        config.network().setInputFile(inputArgs.network.toString());
+        var facilitiesPath = inputArgs.facilities != null ? inputArgs.facilities.toString() : "";
+        config.facilities().setInputFile(facilitiesPath);
         config.global().setCoordinateSystem("EPSG:25832");
         var scenario = ScenarioUtils.loadScenario(config);
         var net = scenario.getNetwork();
         var facilities = scenario.getActivityFacilities();
 
-        StreamingPopulationReader reader = new StreamingPopulationReader(scenario);
-        StreamingPopulationWriter writer25pct = new StreamingPopulationWriter();
-        writer25pct.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-25pct.plans.xml.gz");
-        StreamingPopulationWriter writer1pct = new StreamingPopulationWriter();
-        writer1pct.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-1pct.plans.xml.gz");
-        StreamingPopulationWriter writer01pct = new StreamingPopulationWriter();
-        writer01pct.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-01pct.plans.xml.gz");
-        StreamingPopulationWriter writerSingle = new StreamingPopulationWriter();
-        writerSingle.startStreaming("/Users/janek/Documents/rust_q_sim/berlin/input/berlin-single.plans.xml.gz");
-        var rand = new Random();
-        AtomicInteger personCounter = new AtomicInteger();
+        var writers = inputArgs.targetSampleSizes.stream()
+                .map(size -> {
+                    var propability = size / inputArgs.sampleSize;
+                    var outPath = inputArgs.outputDirectory.resolve(inputArgs.runId + "-" + size + ".plans.xml.gz");
+                    var writer = new StreamingPopulationWriter();
+                    writer.startStreaming(outPath.toString());
+                    return new SampledWriter(propability, writer);
+                })
+                .toList();
 
-        reader.addAlgorithm(person -> {
+        var reader = getStreamingPopulationReader(scenario, facilities, writers);
 
-            var selectedPlan = person.getSelectedPlan();
-            for (PlanElement e : selectedPlan.getPlanElements()) {
-                if (e instanceof Activity a) {
-                    if (a.getLinkId() == null) {
-                        var facility = facilities.getFacilities().get(a.getFacilityId());
-
-                        System.out.println("Found Empty activity. Adding Coord: " + facility.getCoord() + " and link-id:" + facility.getLinkId() + " to activity");
-                        a.setCoord(facility.getCoord());
-                        a.setLinkId(facility.getLinkId());
-                    }
-                } else if (e instanceof Leg l) {
-                    // filter out pt plans
-                    if (l.getMode().equals(TransportMode.pt)) return;
-                }
-            }
-
-            person.getPlans().clear();
-            person.addPlan(selectedPlan);
-
-            // write the first person into the single agent file
-            if (personCounter.get() == 0) {
-                writerSingle.writePerson(person);
-                writerSingle.closeStreaming();
-            }
-
-            // draw 10% sample and 1% sample (out of 10% gives 1% and 0.1% samples)
-            var randNum = rand.nextDouble();
-            if (randNum >= 0.96) {
-                writer1pct.writePerson(person);
-            }
-            if (randNum >= 0.996) {
-                writer01pct.writePerson(person);
-            }
-
-            // write all persons with only selected plan to 10% sample
-            writer25pct.writePerson(person);
-            personCounter.getAndIncrement();
-        });
-        reader.readFile("/Users/janek/Documents/rust_q_sim/berlin/input/004.output_plans.xml.gz");
-        writer25pct.closeStreaming();
-        writer1pct.closeStreaming();
-        writer01pct.closeStreaming();
+        reader.readFile(inputArgs.population.toString());
+        for (var writer : writers) {
+            writer.writer.closeStreaming();
+        }
 
         // filter pt from network and make networks smaller for testing
         var ptLinks = net.getLinks().values().parallelStream()
@@ -100,6 +100,40 @@ public class PrepareRustQSimScenario {
             net.removeNode(node);
         }
 
-        NetworkUtils.writeNetwork(net, "/Users/janek/Documents/rust_q_sim/berlin/input/berlin.network.xml.gz");
+        var netOutPath = inputArgs.outputDirectory.resolve(inputArgs.runId + ".network.xml.gz");
+        NetworkUtils.writeNetwork(net, netOutPath.toString());
+    }
+
+    private static StreamingPopulationReader getStreamingPopulationReader(Scenario scenario, ActivityFacilities facilities, List<SampledWriter> writers) {
+        var reader = new StreamingPopulationReader(scenario);
+        var rand = new Random();
+
+        reader.addAlgorithm(person -> {
+            var selectedPlan = person.getSelectedPlan();
+            for (PlanElement e : selectedPlan.getPlanElements()) {
+                if (e instanceof Activity a) {
+                    if (a.getLinkId() == null) {
+                        var facility = facilities.getFacilities().get(a.getFacilityId());
+
+                        System.out.println("Found Empty activity. Adding Coord: " + facility.getCoord() + " and link-id:" + facility.getLinkId() + " to activity");
+                        a.setCoord(facility.getCoord());
+                        a.setLinkId(facility.getLinkId());
+                    }
+                } else if (e instanceof Leg l) {
+                    // filter out pt plans
+                    if (l.getMode().equals(TransportMode.pt)) return;
+                }
+            }
+
+            person.getPlans().clear();
+            person.addPlan(selectedPlan);
+            var randNum = rand.nextDouble();
+            for (var writer : writers) {
+                if (writer.propability >= randNum) {
+                    writer.writer.writePerson(person);
+                }
+            }
+        });
+        return reader;
     }
 }

@@ -47,6 +47,11 @@
 
 	<dependencies>
 		<dependency>
+			<groupId>org.jcommander</groupId>
+			<artifactId>jcommander</artifactId>
+			<version>1.83</version>
+		</dependency>
+		<dependency>
 			<!-- This is the matsim "core": -->
 			<groupId>org.matsim</groupId>
 			<artifactId>matsim</artifactId>
@@ -138,7 +143,10 @@
 			<artifactId>vsp</artifactId>
 			<version>${matsim.version}</version>
 		</dependency>
-<!--		<dependency>-->
+
+
+
+		<!--		<dependency>-->
 <!--			<groupId>org.matsim.contrib</groupId>-->
 <!--			<artifactId>simwrapper</artifactId>-->
 <!--			<version>${matsim.version}</version>-->

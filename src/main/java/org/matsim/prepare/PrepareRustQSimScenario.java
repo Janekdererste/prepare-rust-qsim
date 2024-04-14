@@ -59,7 +59,7 @@ public class PrepareRustQSimScenario {
 
         var config = ConfigUtils.createConfig();
         config.network().setInputFile(inputArgs.network.toString());
-        var facilitiesPath = inputArgs.facilities != null ? inputArgs.facilities.toString() : "";
+        var facilitiesPath = inputArgs.facilities != null ? inputArgs.facilities.toString() : null;
         config.facilities().setInputFile(facilitiesPath);
         config.global().setCoordinateSystem("EPSG:25832");
         var scenario = ScenarioUtils.loadScenario(config);
@@ -68,11 +68,12 @@ public class PrepareRustQSimScenario {
 
         var writers = inputArgs.targetSampleSizes.stream()
                 .map(size -> {
-                    var propability = size / inputArgs.sampleSize;
-                    var outPath = inputArgs.outputDirectory.resolve(inputArgs.runId + "-" + size + ".plans.xml.gz");
+                    var probability = size / inputArgs.sampleSize;
+                    var sizeName = Math.round(size * 100);
+                    var outPath = inputArgs.outputDirectory.resolve(inputArgs.runId + "-" + sizeName + "pct.plans.xml.gz");
                     var writer = new StreamingPopulationWriter();
                     writer.startStreaming(outPath.toString());
-                    return new SampledWriter(propability, writer);
+                    return new SampledWriter(probability, writer);
                 })
                 .toList();
 

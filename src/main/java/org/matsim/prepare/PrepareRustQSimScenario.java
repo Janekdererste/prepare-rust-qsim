@@ -2,20 +2,22 @@ package org.matsim.prepare;
 
 
 import com.beust.jcommander.Parameter;
-import org.matsim.api.core.v01.Identifiable;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
+import org.matsim.api.core.v01.population.Person;
 import org.matsim.api.core.v01.population.PlanElement;
 import org.matsim.core.config.ConfigUtils;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.io.StreamingPopulationReader;
 import org.matsim.core.population.io.StreamingPopulationWriter;
+import org.matsim.core.router.TripStructureUtils;
 import org.matsim.core.scenario.ScenarioUtils;
 import org.matsim.facilities.ActivityFacilities;
 
 import java.nio.file.Path;
+import java.util.Collection;
 import java.util.List;
 import java.util.Random;
 
@@ -33,6 +35,9 @@ public class PrepareRustQSimScenario {
         @Parameter(names = "-f")
         public Path facilities;
 
+        @Parameter(names = "-e")
+        public Path events;
+
         @Parameter(names = "-o", required = true)
         public Path outputDirectory;
 
@@ -46,7 +51,39 @@ public class PrepareRustQSimScenario {
         public List<Double> targetSampleSizes = List.of(0.1, 0.01, 0.001);
     }
 
-    public record SampledWriter(double propability, StreamingPopulationWriter writer){}
+    public static class SampledWriter {
+
+        private final double probability;
+        private final StreamingPopulationWriter writer;
+
+        SampledWriter(double probability, StreamingPopulationWriter writer) {
+            this.probability = probability;
+            this.writer = writer;
+        }
+
+        public void writePerson(Person person) {
+            writer.writePerson(person);
+        }
+
+        static Collection<SampledWriter> createWriters(Collection<Double> samplesSizes, InputArgs inputArgs) {
+            return samplesSizes.stream()
+                    .map(size -> {
+                        var probability = size / inputArgs.sampleSize;
+                        var sizeName = Math.round(size * 100);
+                        var outPath = inputArgs.outputDirectory.resolve(inputArgs.runId + "-" + sizeName + "pct.plans.xml.gz");
+                        var writer = new StreamingPopulationWriter();
+                        writer.startStreaming(outPath.toString());
+                        return new SampledWriter(probability, writer);
+                    })
+                    .toList();
+        }
+    }
+
+    private static void assertNumberOfActsAndTrips(Collection<Activity> act, Collection<TripStructureUtils.Trip> trips) {
+        if (act.size() != trips.size() + 1) {
+            throw new RuntimeException("Assuming that we always have at one more activity than trip. Because plans look like: \nActivity->Leg->Activity->Leg->Activiy");
+        }
+    }
 
     public static void main(String[] args) {
 
@@ -64,43 +101,27 @@ public class PrepareRustQSimScenario {
         config.global().setCoordinateSystem("EPSG:25832");
         var scenario = ScenarioUtils.loadScenario(config);
         var net = scenario.getNetwork();
-        var facilities = scenario.getActivityFacilities();
 
-        var writers = inputArgs.targetSampleSizes.stream()
-                .map(size -> {
-                    var probability = size / inputArgs.sampleSize;
-                    var sizeName = Math.round(size * 100);
-                    var outPath = inputArgs.outputDirectory.resolve(inputArgs.runId + "-" + sizeName + "pct.plans.xml.gz");
-                    var writer = new StreamingPopulationWriter();
-                    writer.startStreaming(outPath.toString());
-                    return new SampledWriter(probability, writer);
-                })
-                .toList();
+        RemoveMode.remove(scenario, TransportMode.pt);
+        CleanPopulation.clean(scenario);
 
-        var reader = getStreamingPopulationReader(scenario, facilities, writers);
-
-        reader.readFile(inputArgs.population.toString());
-        for (var writer : writers) {
-            writer.writer.closeStreaming();
+        var writers = SampledWriter.createWriters(inputArgs.targetSampleSizes, inputArgs);
+        for (var person : scenario.getPopulation().getPersons().values()) {
+            for (var writer : writers) {
+                writer.writePerson(person);
+            }
         }
 
-        // filter pt from network and make networks smaller for testing
-        var ptLinks = net.getLinks().values().parallelStream()
-                .filter(link -> link.getAllowedModes().contains(TransportMode.pt))
-                .map(Identifiable::getId)
-                .toList();
-        for (var link : ptLinks) {
-            net.removeLink(link);
-        }
+        UpscalePopulation.upscalePopulation(scenario, 2);
+        UpscalePopulation.prepareForSim(scenario, inputArgs.events.toString());
 
-        var emtpyNodes = net.getNodes().values().parallelStream()
-                .filter(node -> node.getInLinks().isEmpty() && node.getOutLinks().isEmpty())
-                .map(Identifiable::getId)
-                .toList();
-        for (var node : emtpyNodes) {
-            net.removeNode(node);
-        }
+        writers = SampledWriter.createWriters(List.of(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0), inputArgs);
 
+        for (var person : scenario.getPopulation().getPersons().values()) {
+            for (var writer : writers) {
+                writer.writePerson(person);
+            }
+        }
         var netOutPath = inputArgs.outputDirectory.resolve(inputArgs.runId + ".network.xml.gz");
         NetworkUtils.writeNetwork(net, netOutPath.toString());
     }
@@ -130,8 +151,8 @@ public class PrepareRustQSimScenario {
             person.addPlan(selectedPlan);
             var randNum = rand.nextDouble();
             for (var writer : writers) {
-                if (writer.propability >= randNum) {
-                    writer.writer.writePerson(person);
+                if (writer.probability >= randNum) {
+                    writer.writePerson(person);
                 }
             }
         });

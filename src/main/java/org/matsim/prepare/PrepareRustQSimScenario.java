@@ -2,38 +2,30 @@ package org.matsim.prepare;
 
 
 import com.beust.jcommander.Parameter;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.matsim.api.core.v01.Identifiable;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.TransportMode;
-import org.matsim.api.core.v01.population.Activity;
-import org.matsim.api.core.v01.population.Leg;
-import org.matsim.api.core.v01.population.Person;
-import org.matsim.api.core.v01.population.PlanElement;
 import org.matsim.core.config.ConfigUtils;
+import org.matsim.core.controler.OutputDirectoryHierarchy;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.io.StreamingPopulationReader;
 import org.matsim.core.population.io.StreamingPopulationWriter;
-import org.matsim.core.router.TripStructureUtils;
 import org.matsim.core.scenario.ScenarioUtils;
-import org.matsim.facilities.ActivityFacilities;
 
 import java.nio.file.Path;
 import java.util.Collection;
 import java.util.List;
-import java.util.Random;
 
 public class PrepareRustQSimScenario {
 
+    private static final Logger log = LogManager.getLogger(PrepareRustQSimScenario.class);
 
     public static class InputArgs {
 
-        @Parameter(names = "-n", required = true)
-        public Path network;
-
-        @Parameter(names = "-p", required = true)
-        public Path population;
-
-        @Parameter(names = "-f")
-        public Path facilities;
+        @Parameter(names = "-c")
+        public Path config;
 
         @Parameter(names = "-e")
         public Path events;
@@ -41,48 +33,20 @@ public class PrepareRustQSimScenario {
         @Parameter(names = "-o", required = true)
         public Path outputDirectory;
 
-        @Parameter(names = "-r", required = true)
-        public String runId;
-
         @Parameter(names = "-s")
         public double sampleSize = 0.1;
-
-        @Parameter(names = "-ts")
-        public List<Double> targetSampleSizes = List.of(0.1, 0.01, 0.001);
     }
 
-    public static class SampledWriter {
-
-        private final double probability;
-        private final StreamingPopulationWriter writer;
-
-        SampledWriter(double probability, StreamingPopulationWriter writer) {
-            this.probability = probability;
-            this.writer = writer;
-        }
-
-        public void writePerson(Person person) {
-            writer.writePerson(person);
-        }
-
-        static Collection<SampledWriter> createWriters(Collection<Double> samplesSizes, InputArgs inputArgs) {
-            return samplesSizes.stream()
-                    .map(size -> {
-                        var probability = size / inputArgs.sampleSize;
-                        var sizeName = Math.round(size * 100);
-                        var outPath = inputArgs.outputDirectory.resolve(inputArgs.runId + "-" + sizeName + "pct.plans.xml.gz");
-                        var writer = new StreamingPopulationWriter();
-                        writer.startStreaming(outPath.toString());
-                        return new SampledWriter(probability, writer);
-                    })
-                    .toList();
-        }
-    }
-
-    private static void assertNumberOfActsAndTrips(Collection<Activity> act, Collection<TripStructureUtils.Trip> trips) {
-        if (act.size() != trips.size() + 1) {
-            throw new RuntimeException("Assuming that we always have at one more activity than trip. Because plans look like: \nActivity->Leg->Activity->Leg->Activiy");
-        }
+    private static Collection<StreamingPopulationWriter> createUpscaleWriters(Collection<Double> samplesSizes, Path outputDir, String runId) {
+        return samplesSizes.stream()
+                .map(size -> {
+                    var sizeName = Math.round(size * 100);
+                    var outPath = outputDir.resolve(runId + "-" + sizeName + "pct.plans.xml.gz");
+                    var writer = new StreamingPopulationWriter(size);
+                    writer.startStreaming(outPath.toString());
+                    return writer;
+                })
+                .toList();
     }
 
     public static void main(String[] args) {
@@ -94,68 +58,43 @@ public class PrepareRustQSimScenario {
                 .build()
                 .parse(args);
 
-        var config = ConfigUtils.createConfig();
-        config.network().setInputFile(inputArgs.network.toString());
-        var facilitiesPath = inputArgs.facilities != null ? inputArgs.facilities.toString() : null;
-        config.facilities().setInputFile(facilitiesPath);
-        config.global().setCoordinateSystem("EPSG:25832");
+        var config = ConfigUtils.loadConfig(inputArgs.config.toString());
+        var plansFile = config.plans().getInputFile();
+        config.plans().setInputFile(null);
+        config.controler().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
         var scenario = ScenarioUtils.loadScenario(config);
-        var net = scenario.getNetwork();
 
-        RemoveMode.remove(scenario, TransportMode.pt);
-        CleanPopulation.clean(scenario);
+        var writers = createUpscaleWriters(List.of(1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2), inputArgs.outputDirectory, config.controler().getRunId());
+        var reader = new StreamingPopulationReader(scenario);
+        reader.addAlgorithm(UpscaleAlgorithm.create(10, scenario, writers));
+        reader.readFile(plansFile);
 
-        var writers = SampledWriter.createWriters(inputArgs.targetSampleSizes, inputArgs);
-        for (var person : scenario.getPopulation().getPersons().values()) {
-            for (var writer : writers) {
-                writer.writePerson(person);
-            }
+        for (var writer : writers) {
+            writer.closeStreaming();
         }
 
-        UpscalePopulation.upscalePopulation(scenario, 2);
-        UpscalePopulation.prepareForSim(scenario, inputArgs.events.toString());
-
-        writers = SampledWriter.createWriters(List.of(0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0), inputArgs);
-
-        for (var person : scenario.getPopulation().getPersons().values()) {
-            for (var writer : writers) {
-                writer.writePerson(person);
-            }
-        }
-        var netOutPath = inputArgs.outputDirectory.resolve(inputArgs.runId + ".network.xml.gz");
-        NetworkUtils.writeNetwork(net, netOutPath.toString());
+        removeLinks(scenario, TransportMode.pt);
+        var netOutPath = inputArgs.outputDirectory.resolve(config.controler().getRunId() + ".network.xml.gz");
+        NetworkUtils.writeNetwork(scenario.getNetwork(), netOutPath.toString());
     }
 
-    private static StreamingPopulationReader getStreamingPopulationReader(Scenario scenario, ActivityFacilities facilities, List<SampledWriter> writers) {
-        var reader = new StreamingPopulationReader(scenario);
-        var rand = new Random();
+    public static void removeLinks(Scenario scenario, String mode) {
+        // filter pt from network and make networks smaller for testing
+        var net = scenario.getNetwork();
+        var ptLinks = net.getLinks().values().parallelStream()
+                .filter(link -> link.getAllowedModes().contains(mode))
+                .map(Identifiable::getId)
+                .toList();
+        for (var link : ptLinks) {
+            net.removeLink(link);
+        }
 
-        reader.addAlgorithm(person -> {
-            var selectedPlan = person.getSelectedPlan();
-            for (PlanElement e : selectedPlan.getPlanElements()) {
-                if (e instanceof Activity a) {
-                    if (a.getLinkId() == null) {
-                        var facility = facilities.getFacilities().get(a.getFacilityId());
-
-                        System.out.println("Found Empty activity. Adding Coord: " + facility.getCoord() + " and link-id:" + facility.getLinkId() + " to activity");
-                        a.setCoord(facility.getCoord());
-                        a.setLinkId(facility.getLinkId());
-                    }
-                } else if (e instanceof Leg l) {
-                    // filter out pt plans
-                    if (l.getMode().equals(TransportMode.pt)) return;
-                }
-            }
-
-            person.getPlans().clear();
-            person.addPlan(selectedPlan);
-            var randNum = rand.nextDouble();
-            for (var writer : writers) {
-                if (writer.probability >= randNum) {
-                    writer.writePerson(person);
-                }
-            }
-        });
-        return reader;
+        var emtpyNodes = net.getNodes().values().parallelStream()
+                .filter(node -> node.getInLinks().isEmpty() && node.getOutLinks().isEmpty())
+                .map(Identifiable::getId)
+                .toList();
+        for (var node : emtpyNodes) {
+            net.removeNode(node);
+        }
     }
 }

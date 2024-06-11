@@ -15,8 +15,11 @@ import org.matsim.core.router.TripStructureUtils;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.Random;
 
 public class UpscalePopulation {
+
+    private static final Random rnd = new Random(42);
 
     public static void upscalePopulation(Scenario scenario, double factor) {
         for (var person : new HashSet<>(scenario.getPopulation().getPersons().values())) {
@@ -53,7 +56,7 @@ public class UpscalePopulation {
 
             while (actIter.hasNext()) {
                 var act = actIter.next();
-                // TODO use random coords
+                var rndCoord = createRandomCoord(act.getCoord(), rnd);
                 var newAct = factory.createActivityFromCoord(act.getType(), new Coord(act.getCoord().getX(), act.getCoord().getY()));
                 if (act.getStartTime().isDefined()) {
                     newAct.setStartTime(act.getStartTime().seconds());
@@ -85,5 +88,12 @@ public class UpscalePopulation {
         if (act.size() != trips.size() + 1) {
             throw new RuntimeException("Assuming that we always have at one more activity than trip. Because plans look like: \nActivity->Leg->Activity->Leg->Activiy");
         }
+    }
+
+    private static Coord createRandomCoord(Coord coord, Random rnd) {
+
+        var x = rnd.nextDouble(coord.getX() - 100, coord.getX() + 100);
+        var y = rnd.nextDouble(coord.getY() - 100, coord.getY() + 100);
+        return new Coord(x, y);
     }
 }

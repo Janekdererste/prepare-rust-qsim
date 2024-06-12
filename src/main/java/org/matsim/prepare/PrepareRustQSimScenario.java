@@ -62,11 +62,12 @@ public class PrepareRustQSimScenario {
         var plansFile = config.plans().getInputFile();
         config.plans().setInputFile(null);
         config.controler().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+        config.travelTimeCalculator().setMaxTime(144000); // 40 hours
         var scenario = ScenarioUtils.loadScenario(config);
 
         var writers = createUpscaleWriters(List.of(1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2), inputArgs.outputDirectory, config.controler().getRunId());
         var reader = new StreamingPopulationReader(scenario);
-        reader.addAlgorithm(UpscaleAlgorithm.create(10, scenario, writers));
+        reader.addAlgorithm(UpscaleAlgorithm.create(10, inputArgs.events.toString(), scenario, writers));
         reader.readFile(plansFile);
 
         for (var writer : writers) {

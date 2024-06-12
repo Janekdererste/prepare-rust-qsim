@@ -9,9 +9,11 @@ import org.matsim.api.core.v01.TransportMode;
 import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
 import org.matsim.api.core.v01.population.Person;
+import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 import org.matsim.core.config.groups.PlansConfigGroup;
 import org.matsim.core.controler.Injector;
+import org.matsim.core.events.EventsUtils;
 import org.matsim.core.population.algorithms.PersonAlgorithm;
 import org.matsim.core.population.algorithms.XY2Links;
 import org.matsim.core.population.routes.NetworkRoute;
@@ -39,7 +41,7 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
     private final Config config;
     private final Collection<? extends PersonAlgorithm> personAlgorithms;
     private final double factor;
-    private final Random rnd = new Random(42);
+    private final List<Random> rnds = new ArrayList<>();
 
     public UpscaleAlgorithm(double factor, PlanRouter router, XY2Links xy2Links, Config config, Scenario scenario, Collection<? extends PersonAlgorithm> personAlgorithms) {
         this.router = router;
@@ -49,10 +51,15 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         this.config = config;
         this.personAlgorithms = personAlgorithms;
         this.factor = factor;
+        for (var i = 0; i < factor - 1; i++) {
+            rnds.add(new Random(i));
+        }
     }
 
-    static UpscaleAlgorithm create(double factor, Scenario scenario, Collection<? extends PersonAlgorithm> algorithms) {
+    static UpscaleAlgorithm create(double factor, String eventsFile, Scenario scenario, Collection<? extends PersonAlgorithm> algorithms) {
         var injector = Injector.createMinimalMatsimInjector(scenario.getConfig(), scenario);
+        var eventsManager = injector.getInstance(EventsManager.class);
+        EventsUtils.readEvents(eventsManager, eventsFile);
         var tripRouter = injector.getInstance(TripRouter.class);
         var timeInterpretation = injector.getInstance(TimeInterpretation.class);
         var planRouter = new PlanRouter(tripRouter, timeInterpretation);
@@ -68,19 +75,29 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         removeExceptSelectedPlan(person);
         setActCoordsFromFacilities(person);
 
-        for (var cloned : clonePerson(person)) {
-            addModeVehicles(cloned, scenario);
-            addRoutingModeIfNecessary(cloned, config);
-            preparePersonForSim(cloned);
+        // try to process cloned agents in parallel.
+        // it would be better to have this run method parallelized, but I think
+        // that is much more work. So, we compromise on approach, which is cheap
+        // to implement
+        Stream.iterate(0, i -> i + 1).parallel()
+                .limit((int) factor - 1)
+                .map(i -> clonePerson(person, i))
+                .forEach(cloned -> {
+                    addModeVehicles(cloned, scenario);
+                    addRoutingModeIfNecessary(cloned, config);
+                    preparePersonForSim(cloned);
 
-            for (var algorithm : personAlgorithms) {
-                algorithm.run(cloned);
-            }
-        }
+                    for (var algorithm : personAlgorithms) {
+                        synchronized (algorithm) {
+                            algorithm.run(cloned);
+                        }
+                    }
+                });
 
-        for (var algorithm : personAlgorithms) {
+        // we can call all algorithms in parallel for the last person
+        personAlgorithms.parallelStream().forEach(algorithm -> {
             algorithm.run(person);
-        }
+        });
     }
 
     private boolean isPtPerson(Person person) {
@@ -110,49 +127,45 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         }
     }
 
-    private Collection<Person> clonePerson(Person person) {
+    private Person clonePerson(Person person, int i) {
 
         var trips = TripStructureUtils.getTrips(person.getSelectedPlan());
         var mainActs = TripStructureUtils.getActivities(person.getSelectedPlan(), TripStructureUtils.StageActivityHandling.ExcludeStageActivities);
         assertNumberOfActsAndTrips(mainActs, trips);
-        var result = new ArrayList<Person>(person.getSelectedPlan().getPlanElements().size());
         var factory = scenario.getPopulation().getFactory();
+        var rnd = rnds.get(i);
 
-        // use < factor -1 because we have one person already. If we want to scale 10x, we need to add 9 persons
-        for (var i = 0; i < factor - 1; i++) {
-            var tripIter = trips.iterator();
-            var actIter = mainActs.iterator();
-            var newPerson = factory.createPerson(Id.createPersonId(person.getId().toString() + "_cloned_" + i));
-            var newPlan = factory.createPlan();
+        var tripIter = trips.iterator();
+        var actIter = mainActs.iterator();
+        var newPerson = factory.createPerson(Id.createPersonId(person.getId().toString() + "_cloned_" + i));
+        var newPlan = factory.createPlan();
 
-            while (actIter.hasNext()) {
-                var act = actIter.next();
-                var rndCoord = createRandomCoord(act.getCoord(), rnd);
-                var newAct = factory.createActivityFromCoord(act.getType(), rndCoord);
-                if (act.getStartTime().isDefined()) {
-                    newAct.setStartTime(createRandomTime(act.getStartTime().seconds(), rnd));
-                }
-                if (act.getEndTime().isDefined()) {
-                    newAct.setEndTime(createRandomTime(act.getEndTime().seconds(), rnd));
-                }
-                if (act.getMaximumDuration().isDefined()) {
-                    newAct.setMaximumDuration(createRandomTime(act.getMaximumDuration().seconds(), rnd));
-                }
-
-                newPlan.addActivity(act);
-
-                if (tripIter.hasNext()) {
-                    var trip = tripIter.next();
-                    var mainMode = TripStructureUtils.identifyMainMode(trip.getTripElements());
-                    var leg = factory.createLeg(mainMode);
-                    newPlan.addLeg(leg);
-                }
+        while (actIter.hasNext()) {
+            var act = actIter.next();
+            var rndCoord = createRandomCoord(act.getCoord(), rnd);
+            var newAct = factory.createActivityFromCoord(act.getType(), rndCoord);
+            if (act.getStartTime().isDefined()) {
+                newAct.setStartTime(createRandomTime(act.getStartTime().seconds(), rnd));
+            }
+            if (act.getEndTime().isDefined()) {
+                newAct.setEndTime(createRandomTime(act.getEndTime().seconds(), rnd));
+            }
+            if (act.getMaximumDuration().isDefined()) {
+                newAct.setMaximumDuration(createRandomTime(act.getMaximumDuration().seconds(), rnd));
             }
 
-            newPerson.addPlan(newPlan);
-            result.add(newPerson);
+            newPlan.addActivity(newAct);
+
+            if (tripIter.hasNext()) {
+                var trip = tripIter.next();
+                var mainMode = TripStructureUtils.identifyMainMode(trip.getTripElements());
+                var leg = factory.createLeg(mainMode);
+                newPlan.addLeg(leg);
+            }
         }
-        return result;
+
+        newPerson.addPlan(newPlan);
+        return newPerson;
     }
 
     private static void assertNumberOfActsAndTrips(Collection<Activity> act, Collection<TripStructureUtils.Trip> trips) {
@@ -169,7 +182,8 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
     }
 
     private static double createRandomTime(double time, Random rnd) {
-        return rnd.nextDouble(time - 1800, time + 1800);
+        var rndTime = rnd.nextDouble(time - 1800, time + 1800);
+        return Math.max(0, rndTime); // don't allow negative times.
     }
 
     private void preparePersonForSim(Person person) {

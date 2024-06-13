@@ -24,17 +24,20 @@ public class PrepareRustQSimScenario {
 
     public static class InputArgs {
 
-        @Parameter(names = "-c")
+        @Parameter(names = "-c", required = true)
         public Path config;
 
-        @Parameter(names = "-e")
+        @Parameter(names = "-e", required = true)
         public Path events;
 
         @Parameter(names = "-o", required = true)
         public Path outputDirectory;
 
-        @Parameter(names = "-s")
-        public double sampleSize = 0.1;
+        @Parameter(names = "-f")
+        public double factor = 10.;
+
+        @Parameter(names = "-ss")
+        public List<Double> sampleSizes = List.of(1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1, 0.01, 0.001);
     }
 
     private static Collection<StreamingPopulationWriter> createUpscaleWriters(Collection<Double> samplesSizes, Path outputDir, String runId) {
@@ -65,9 +68,9 @@ public class PrepareRustQSimScenario {
         config.travelTimeCalculator().setMaxTime(144000); // 40 hours
         var scenario = ScenarioUtils.loadScenario(config);
 
-        var writers = createUpscaleWriters(List.of(1.0, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2), inputArgs.outputDirectory, config.controler().getRunId());
+        var writers = createUpscaleWriters(inputArgs.sampleSizes, inputArgs.outputDirectory, config.controler().getRunId());
         var reader = new StreamingPopulationReader(scenario);
-        reader.addAlgorithm(UpscaleAlgorithm.create(10, inputArgs.events.toString(), scenario, writers));
+        reader.addAlgorithm(UpscaleAlgorithm.create(inputArgs.factor, inputArgs.events.toString(), scenario, writers));
         reader.readFile(plansFile);
 
         for (var writer : writers) {

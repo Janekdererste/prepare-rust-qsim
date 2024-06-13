@@ -14,6 +14,7 @@ import org.matsim.core.config.Config;
 import org.matsim.core.config.groups.PlansConfigGroup;
 import org.matsim.core.controler.Injector;
 import org.matsim.core.events.EventsUtils;
+import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.algorithms.PersonAlgorithm;
 import org.matsim.core.population.algorithms.XY2Links;
 import org.matsim.core.population.routes.NetworkRoute;
@@ -63,7 +64,10 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         var tripRouter = injector.getInstance(TripRouter.class);
         var timeInterpretation = injector.getInstance(TimeInterpretation.class);
         var planRouter = new PlanRouter(tripRouter, timeInterpretation);
-        var xy2Links = new XY2Links(scenario);
+        var carOnlyNet = scenario.getNetwork().getLinks().values().stream()
+                .filter(link -> link.getAllowedModes().contains(TransportMode.car))
+                .collect(NetworkUtils.getCollector());
+        var xy2Links = new XY2Links(carOnlyNet, scenario.getActivityFacilities());
         return new UpscaleAlgorithm(factor, planRouter, xy2Links, scenario.getConfig(), scenario, algorithms);
     }
 

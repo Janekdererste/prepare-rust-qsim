@@ -77,7 +77,7 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         if (isPtPerson(person)) return; // exclude all pt persons.
 
         removeExceptSelectedPlan(person);
-        setActCoordsFromFacilities(person);
+        setActCoordsFromFacilities(person, this.scenario);
 
         // try to process cloned agents in parallel.
         // it would be better to have this run method parallelized, but I think
@@ -85,11 +85,11 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         // to implement
         Stream.iterate(0, i -> i + 1).parallel()
                 .limit((int) factor - 1)
-                .map(i -> clonePerson(person, i))
+                .map(i -> clonePerson(person, i, scenario, rnds.get(i)))
                 .forEach(cloned -> {
-                    addModeVehicles(cloned, scenario);
+                    addModeVehicles(cloned, scenario, modeVehicleTypes);
                     addRoutingModeIfNecessary(cloned, config);
-                    preparePersonForSim(cloned);
+                    preparePersonForSim(cloned, xy2Links, router);
 
                     for (var algorithm : personAlgorithms) {
                         synchronized (algorithm) {
@@ -104,7 +104,7 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         });
     }
 
-    private boolean isPtPerson(Person person) {
+    public static boolean isPtPerson(Person person) {
         var mode = TransportMode.pt;
         return person.getSelectedPlan().getPlanElements().stream()
                 .filter(e -> e instanceof Leg)
@@ -112,13 +112,13 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
                 .anyMatch(l -> l.getRoutingMode().contains(mode) || l.getMode().contains(mode));
     }
 
-    private void removeExceptSelectedPlan(Person person) {
+    public static void removeExceptSelectedPlan(Person person) {
         var selecedPlan = person.getSelectedPlan();
         person.getPlans().clear();
         person.addPlan(selecedPlan);
     }
 
-    private void setActCoordsFromFacilities(Person person) {
+    public static void setActCoordsFromFacilities(Person person, Scenario scenario) {
         var acts = TripStructureUtils.getActivities(person.getSelectedPlan(), TripStructureUtils.StageActivityHandling.ExcludeStageActivities);
         for (var a : acts) {
             if (a.getLinkId() == null) {
@@ -131,13 +131,12 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         }
     }
 
-    private Person clonePerson(Person person, int i) {
+    public static Person clonePerson(Person person, int i, Scenario scenario, Random rnd) {
 
         var trips = TripStructureUtils.getTrips(person.getSelectedPlan());
         var mainActs = TripStructureUtils.getActivities(person.getSelectedPlan(), TripStructureUtils.StageActivityHandling.ExcludeStageActivities);
         assertNumberOfActsAndTrips(mainActs, trips);
         var factory = scenario.getPopulation().getFactory();
-        var rnd = rnds.get(i);
 
         var tripIter = trips.iterator();
         var actIter = mainActs.iterator();
@@ -190,21 +189,21 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         return Math.max(0, rndTime); // don't allow negative times.
     }
 
-    private void preparePersonForSim(Person person) {
+    public static void preparePersonForSim(Person person, XY2Links xy2Links, PlanRouter router) {
 
         var plan = person.getSelectedPlan();
-        this.xy2Links.run(plan);
-        this.router.run(plan);
+        xy2Links.run(plan);
+        router.run(plan);
     }
 
-    private static Map<String, VehicleType> createModeVehicleTypes(Config config, Scenario scenario) {
+    public static Map<String, VehicleType> createModeVehicleTypes(Config config, Scenario scenario) {
         return Stream.concat(config.qsim().getMainModes().stream(), config.plansCalcRoute().getNetworkModes().stream())
                 .distinct()
                 .map(mode -> Tuple.of(mode, scenario.getVehicles().getVehicleTypes().get(Id.create(mode, VehicleType.class))))
                 .collect(Collectors.toMap(Tuple::getFirst, Tuple::getSecond));
     }
 
-    private void addModeVehicles(Person person, Scenario scenario) {
+    public static void addModeVehicles(Person person, Scenario scenario, Map<String, VehicleType> modeVehicleTypes) {
 
         var mode2Vehicle = new HashMap<String, Id<Vehicle>>();
 
@@ -221,7 +220,7 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
     }
 
     /// Stuff below is copied from personprepareforsim because it was not public.
-    private void addRoutingModeIfNecessary(Person person, Config config) {
+    public static void addRoutingModeIfNecessary(Person person, Config config) {
 
         var plan = person.getSelectedPlan();
         for (TripStructureUtils.Trip trip : TripStructureUtils.getTrips(plan.getPlanElements())) {
@@ -309,11 +308,11 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         }
     }
 
-    private String getAndAddRoutingModeFromBackwardCompatibilityMainModeIdentifier(Person person, TripStructureUtils.Trip trip) {
+    private static String getAndAddRoutingModeFromBackwardCompatibilityMainModeIdentifier(Person person, TripStructureUtils.Trip trip) {
         throw new RuntimeException("Not implemented");
     }
 
-    private void replaceOutdatedAccessEgressWalkModes(Leg leg, String routingMode) {
+    private static void replaceOutdatedAccessEgressWalkModes(Leg leg, String routingMode) {
         // access_walk and egress_walk were replaced by non_network_walk
         if (leg.getMode().equals("access_walk") || leg.getMode().equals("egress_walk")) {
             leg.setMode(TransportMode.non_network_walk);
@@ -323,14 +322,14 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
 
     // non_network_walk as access/egress to modes other than walk on the network was replaced by walk. -
     // kn/gl-nov'19
-    private void replaceOutdatedNonNetworkWalk(Leg leg, String routingMode) {
+    private static void replaceOutdatedNonNetworkWalk(Leg leg, String routingMode) {
         if (leg.getMode().equals(TransportMode.non_network_walk)) {
             leg.setMode(TransportMode.walk);
             TripStructureUtils.setRoutingMode(leg, routingMode);
         }
     }
 
-    private String replaceOutdatedFallbackModesAndReturnOldMainMode(Leg leg, String routingMode) {
+    private static String replaceOutdatedFallbackModesAndReturnOldMainMode(Leg leg, String routingMode) {
         // transit_walk was replaced by walk (formerly fallback and access/egress/transfer to pt mode)
         if (leg.getMode().equals(TransportMode.transit_walk)) {
             leg.setMode(TransportMode.walk);

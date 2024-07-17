@@ -8,7 +8,6 @@ import org.matsim.api.core.v01.population.Person;
 import org.matsim.core.api.experimental.events.EventsManager;
 import org.matsim.core.config.Config;
 import org.matsim.core.controler.Injector;
-import org.matsim.core.events.EventsUtils;
 import org.matsim.core.network.NetworkUtils;
 import org.matsim.core.population.algorithms.PersonAlgorithm;
 import org.matsim.core.population.algorithms.XY2Links;
@@ -47,7 +46,7 @@ public class SimpleUpscaleAlgorithm implements PersonAlgorithm {
     public static SimpleUpscaleAlgorithm create(double factor, String eventsFile, Scenario scenario, PersonAlgorithm algorithm) {
         var injector = Injector.createMinimalMatsimInjector(scenario.getConfig(), scenario);
         var eventsManager = injector.getInstance(EventsManager.class);
-        EventsUtils.readEvents(eventsManager, eventsFile);
+        // EventsUtils.readEvents(eventsManager, eventsFile);
         var tripRouter = injector.getInstance(TripRouter.class);
         var timeInterpretation = injector.getInstance(TimeInterpretation.class);
         var planRouter = new PlanRouter(tripRouter, timeInterpretation);
@@ -82,12 +81,13 @@ public class SimpleUpscaleAlgorithm implements PersonAlgorithm {
     }
 
     private static int calcLimit(double factor, Random rnd) {
+
+        int floor = (int) factor;
+        double diff = factor - floor;
+        int add = rnd.nextDouble() <= diff ? 1 : 0;
         // subtract 1, as we are taking the original agent as well in any case. for example:
         // for factor = 2.0 we must clone original agent once, because we will include the original
         // agent and the cloned one.
-        int floor = (int) factor - 1;
-        double diff = factor - floor;
-        int add = rnd.nextDouble() <= diff ? 1 : 0;
-        return floor + add;
+        return floor - 1 + add;
     }
 }

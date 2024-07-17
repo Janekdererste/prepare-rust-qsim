@@ -19,9 +19,6 @@ public class PrepareRustScalingExperiment {
         @Parameter(names = "-c", required = true)
         public Path config;
 
-        @Parameter(names = "-e", required = true)
-        public Path events;
-
         @Parameter(names = "-o", required = true)
         public Path outputDirectory;
 
@@ -59,8 +56,7 @@ public class PrepareRustScalingExperiment {
 
         if (factor > 1.0) {
             var upscaleAlgorithm = SimpleUpscaleAlgorithm.create(
-                    inputArgs.targetSampleSize / inputArgs.sourceSampleSize,
-                    inputArgs.events.toString(), scenario, writer
+                    inputArgs.targetSampleSize / inputArgs.sourceSampleSize, scenario, writer
             );
             var filter = new PtFilter(upscaleAlgorithm, scenario);
             reader.addAlgorithm(filter);

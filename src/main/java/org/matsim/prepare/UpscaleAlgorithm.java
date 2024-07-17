@@ -141,20 +141,26 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         var tripIter = trips.iterator();
         var actIter = mainActs.iterator();
         var newPerson = factory.createPerson(Id.createPersonId(person.getId().toString() + "_cloned_" + i));
-        var newPlan = factory.createPlan();
+        var plan = person.getSelectedPlan();
+        newPerson.addPlan(plan);
+
+       /* var newPlan = factory.createPlan();
 
         while (actIter.hasNext()) {
             var act = actIter.next();
-            var rndCoord = createRandomCoord(act.getCoord(), rnd);
-            var newAct = factory.createActivityFromCoord(act.getType(), rndCoord);
+            //var rndCoord = createRandomCoord(act.getCoord(), rnd);
+            var newAct = factory.createActivityFromCoord(act.getType(), act.getCoord());
             if (act.getStartTime().isDefined()) {
-                newAct.setStartTime(createRandomTime(act.getStartTime().seconds(), rnd));
+                //newAct.setStartTime(createRandomTime(act.getStartTime().seconds(), rnd));
+                newAct.setStartTime(act.getStartTime().seconds());
             }
             if (act.getEndTime().isDefined()) {
-                newAct.setEndTime(createRandomTime(act.getEndTime().seconds(), rnd));
+                //newAct.setEndTime(createRandomTime(act.getEndTime().seconds(), rnd));
+                newAct.setEndTime(act.getEndTime().seconds());
             }
             if (act.getMaximumDuration().isDefined()) {
-                newAct.setMaximumDuration(createRandomTime(act.getMaximumDuration().seconds(), rnd));
+                //newAct.setMaximumDuration(createRandomTime(act.getMaximumDuration().seconds(), rnd));
+                newAct.setMaximumDuration(act.getMaximumDuration().seconds());
             }
 
             newPlan.addActivity(newAct);
@@ -168,6 +174,8 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         }
 
         newPerson.addPlan(newPlan);
+
+        */
         return newPerson;
     }
 

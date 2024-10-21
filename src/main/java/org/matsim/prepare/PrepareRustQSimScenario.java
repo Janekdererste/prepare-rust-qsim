@@ -2,8 +2,6 @@ package org.matsim.prepare;
 
 
 import com.beust.jcommander.Parameter;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.matsim.api.core.v01.Identifiable;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.TransportMode;
@@ -19,8 +17,6 @@ import java.util.Collection;
 import java.util.List;
 
 public class PrepareRustQSimScenario {
-
-    private static final Logger log = LogManager.getLogger(PrepareRustQSimScenario.class);
 
     public static class InputArgs {
 
@@ -64,11 +60,11 @@ public class PrepareRustQSimScenario {
         var config = ConfigUtils.loadConfig(inputArgs.config.toString());
         var plansFile = config.plans().getInputFile();
         config.plans().setInputFile(null);
-        config.controler().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+        config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
         config.travelTimeCalculator().setMaxTime(144000); // 40 hours
         var scenario = ScenarioUtils.loadScenario(config);
 
-        var writers = createUpscaleWriters(inputArgs.sampleSizes, inputArgs.outputDirectory, config.controler().getRunId());
+        var writers = createUpscaleWriters(inputArgs.sampleSizes, inputArgs.outputDirectory, config.controller().getRunId());
         var reader = new StreamingPopulationReader(scenario);
         reader.addAlgorithm(UpscaleAlgorithm.create(inputArgs.factor, inputArgs.events.toString(), scenario, writers));
         reader.readFile(plansFile);
@@ -78,7 +74,7 @@ public class PrepareRustQSimScenario {
         }
 
         removeLinks(scenario, TransportMode.pt);
-        var netOutPath = inputArgs.outputDirectory.resolve(config.controler().getRunId() + ".network.xml.gz");
+        var netOutPath = inputArgs.outputDirectory.resolve(config.controller().getRunId() + ".network.xml.gz");
         NetworkUtils.writeNetwork(scenario.getNetwork(), netOutPath.toString());
     }
 

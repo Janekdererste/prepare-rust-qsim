@@ -2,7 +2,6 @@ package org.matsim.prepare;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import org.matsim.api.core.v01.Coord;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.Scenario;
 import org.matsim.api.core.v01.TransportMode;
@@ -85,13 +84,14 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         // to implement
         Stream.iterate(0, i -> i + 1).parallel()
                 .limit((int) factor - 1)
-                .map(i -> clonePerson(person, i, scenario, rnds.get(i)))
+                .map(i -> clonePerson(person, i, scenario))
                 .forEach(cloned -> {
                     addModeVehicles(cloned, scenario, modeVehicleTypes);
                     addRoutingModeIfNecessary(cloned, config);
                     preparePersonForSim(cloned, xy2Links, router);
 
                     for (var algorithm : personAlgorithms) {
+                        //noinspection SynchronizationOnLocalVariableOrMethodParameter
                         synchronized (algorithm) {
                             algorithm.run(cloned);
                         }
@@ -99,9 +99,7 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
                 });
 
         // we can call all algorithms in parallel for the last person
-        personAlgorithms.parallelStream().forEach(algorithm -> {
-            algorithm.run(person);
-        });
+        personAlgorithms.parallelStream().forEach(algorithm -> algorithm.run(person));
     }
 
     public static boolean isPtPerson(Person person) {
@@ -131,51 +129,16 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         }
     }
 
-    public static Person clonePerson(Person person, int i, Scenario scenario, Random rnd) {
+    public static Person clonePerson(Person person, int i, Scenario scenario) {
 
         var trips = TripStructureUtils.getTrips(person.getSelectedPlan());
         var mainActs = TripStructureUtils.getActivities(person.getSelectedPlan(), TripStructureUtils.StageActivityHandling.ExcludeStageActivities);
         assertNumberOfActsAndTrips(mainActs, trips);
         var factory = scenario.getPopulation().getFactory();
 
-        var tripIter = trips.iterator();
-        var actIter = mainActs.iterator();
         var newPerson = factory.createPerson(Id.createPersonId(person.getId().toString() + "_cloned_" + i));
         var plan = person.getSelectedPlan();
         newPerson.addPlan(plan);
-
-       /* var newPlan = factory.createPlan();
-
-        while (actIter.hasNext()) {
-            var act = actIter.next();
-            //var rndCoord = createRandomCoord(act.getCoord(), rnd);
-            var newAct = factory.createActivityFromCoord(act.getType(), act.getCoord());
-            if (act.getStartTime().isDefined()) {
-                //newAct.setStartTime(createRandomTime(act.getStartTime().seconds(), rnd));
-                newAct.setStartTime(act.getStartTime().seconds());
-            }
-            if (act.getEndTime().isDefined()) {
-                //newAct.setEndTime(createRandomTime(act.getEndTime().seconds(), rnd));
-                newAct.setEndTime(act.getEndTime().seconds());
-            }
-            if (act.getMaximumDuration().isDefined()) {
-                //newAct.setMaximumDuration(createRandomTime(act.getMaximumDuration().seconds(), rnd));
-                newAct.setMaximumDuration(act.getMaximumDuration().seconds());
-            }
-
-            newPlan.addActivity(newAct);
-
-            if (tripIter.hasNext()) {
-                var trip = tripIter.next();
-                var mainMode = TripStructureUtils.identifyMainMode(trip.getTripElements());
-                var leg = factory.createLeg(mainMode);
-                newPlan.addLeg(leg);
-            }
-        }
-
-        newPerson.addPlan(newPlan);
-
-        */
         return newPerson;
     }
 
@@ -183,18 +146,6 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
         if (act.size() != trips.size() + 1) {
             throw new RuntimeException("Assuming that we always have at one more activity than trip. Because plans look like: \nActivity->Leg->Activity->Leg->Activiy");
         }
-    }
-
-    private static Coord createRandomCoord(Coord coord, Random rnd) {
-
-        var x = rnd.nextDouble(coord.getX() - 100, coord.getX() + 100);
-        var y = rnd.nextDouble(coord.getY() - 100, coord.getY() + 100);
-        return new Coord(x, y);
-    }
-
-    private static double createRandomTime(double time, Random rnd) {
-        var rndTime = rnd.nextDouble(time - 1800, time + 1800);
-        return Math.max(0, rndTime); // don't allow negative times.
     }
 
     public static void preparePersonForSim(Person person, XY2Links xy2Links, PlanRouter router) {
@@ -205,7 +156,7 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
     }
 
     public static Map<String, VehicleType> createModeVehicleTypes(Config config, Scenario scenario) {
-        return Stream.concat(config.qsim().getMainModes().stream(), config.plansCalcRoute().getNetworkModes().stream())
+        return Stream.concat(config.qsim().getMainModes().stream(), config.routing().getNetworkModes().stream())
                 .distinct()
                 .map(mode -> Tuple.of(mode, scenario.getVehicles().getVehicleTypes().get(Id.create(mode, VehicleType.class))))
                 .collect(Collectors.toMap(Tuple::getFirst, Tuple::getSecond));

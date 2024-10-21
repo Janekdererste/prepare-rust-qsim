@@ -41,6 +41,7 @@ public class RunMatsim{
 		}
 
 		config.controller().setOverwriteFileSetting( OverwriteFileSetting.deleteDirectoryIfExists );
+		config.controller().setLastIteration(0);
 
 		// possibly modify config here
 

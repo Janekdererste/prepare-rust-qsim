@@ -28,7 +28,7 @@ public class PrepareRustScalingExperiment {
         @Parameter(names = "-tss", required = true)
         public double targetSampleSize;
 
-        @Parameter(names = "-wn", required = false)
+        @Parameter(names = "-wn")
         public boolean writeNetwork = false;
     }
 
@@ -43,13 +43,13 @@ public class PrepareRustScalingExperiment {
         var config = ConfigUtils.loadConfig(inputArgs.config.toString());
         var plansFile = Paths.get(config.getContext().toString()).getParent().resolve(config.plans().getInputFile());
         config.plans().setInputFile(null);
-        config.controler().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+        config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
         config.travelTimeCalculator().setMaxTime(144000); // 40 hours
         var scenario = ScenarioUtils.loadScenario(config);
 
         var factor = inputArgs.targetSampleSize / inputArgs.sourceSampleSize;
         var sizeName = String.format("%.1f", inputArgs.targetSampleSize * 100);
-        var outPath = inputArgs.outputDirectory.resolve(config.controler().getRunId() + "-" + sizeName + "pct.plans.xml.gz");
+        var outPath = inputArgs.outputDirectory.resolve(config.controller().getRunId() + "-" + sizeName + "pct.plans.xml.gz");
         var writer = new StreamingPopulationWriter(factor);
         writer.startStreaming(outPath.toString());
         var reader = new StreamingPopulationReader(scenario);
@@ -69,7 +69,7 @@ public class PrepareRustScalingExperiment {
 
         if (inputArgs.writeNetwork) {
             PrepareRustQSimScenario.removeLinks(scenario, TransportMode.pt);
-            var netOutPath = inputArgs.outputDirectory.resolve(config.controler().getRunId() + ".network.xml.gz");
+            var netOutPath = inputArgs.outputDirectory.resolve(config.controller().getRunId() + ".network.xml.gz");
             NetworkUtils.writeNetwork(scenario.getNetwork(), netOutPath.toString());
         }
     }

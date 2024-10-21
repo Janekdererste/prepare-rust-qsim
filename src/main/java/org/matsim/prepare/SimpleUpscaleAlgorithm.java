@@ -48,7 +48,7 @@ public class SimpleUpscaleAlgorithm implements PersonAlgorithm {
         // clone agents
         Stream.iterate(0, i -> i + 1)
                 .limit(calcLimit(factor, rnd))
-                .map(i -> UpscaleAlgorithm.clonePerson(person, i, scenario, rnd))
+                .map(i -> UpscaleAlgorithm.clonePerson(person, i, scenario))
                 .forEach(cloned -> {
                     UpscaleAlgorithm.addModeVehicles(cloned, scenario, modeVehicleTypes);
                     personAlgorithm.run(cloned); // write to file

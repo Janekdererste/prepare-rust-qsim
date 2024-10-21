@@ -240,7 +240,7 @@ public class UpscaleAlgorithm implements PersonAlgorithm {
                                     + "\nTrip: " + trip.getTripElements().toString()
                                     + "\nTerminating. Take care to inject an adequate MainModeIdentifier and set config switch "
                                     + "plansConfigGroup.setHandlingOfPlansWithoutRoutingMode("
-                                    + PlansConfigGroup.HandlingOfPlansWithoutRoutingMode.useMainModeIdentifier.toString() + ").";
+                                    + PlansConfigGroup.HandlingOfPlansWithoutRoutingMode.useMainModeIdentifier + ").";
                             log.error(errorMessage);
                             throw new RuntimeException(errorMessage);
                         }

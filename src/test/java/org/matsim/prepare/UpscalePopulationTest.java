@@ -1,7 +1,7 @@
 package org.matsim.prepare;
 
-import org.junit.Rule;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 import org.matsim.api.core.v01.Id;
 import org.matsim.api.core.v01.population.Activity;
 import org.matsim.api.core.v01.population.Leg;
@@ -15,11 +15,11 @@ import org.matsim.testcases.MatsimTestUtils;
 
 import java.util.ArrayList;
 
-import static org.junit.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class UpscalePopulationTest {
 
-    @Rule
+    @RegisterExtension
     public MatsimTestUtils utils = new MatsimTestUtils();
 
     @Test
@@ -51,7 +51,7 @@ public class UpscalePopulationTest {
             var clonedId = Id.createPersonId(origId.toString() + "_cloned_0");
             var clonedPerson = scenario.getPopulation().getPersons().get(clonedId);
 
-            assertNotNull("Could not find cloned person with id: " + clonedId, clonedPerson);
+            assertNotNull(clonedPerson);
 
             assertEquals(origPerson.getSelectedPlan().getPlanElements().size(), clonedPerson.getSelectedPlan().getPlanElements().size());
             var origIter = origPerson.getSelectedPlan().getPlanElements().iterator();
@@ -89,8 +89,8 @@ public class UpscalePopulationTest {
 
         var configURL = IOUtils.extendUrl(ExamplesUtils.getTestScenarioURL("equil"), "config.xml");
         var config = ConfigUtils.loadConfig(configURL);
-        config.controler().setOutputDirectory(utils.getOutputDirectory() + "output-2");
-        config.controler().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+        config.controller().setOutputDirectory(utils.getOutputDirectory() + "output-2");
+        config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
         var scenario = ScenarioUtils.loadScenario(config);
 
         var controler = new Controler(scenario);
@@ -106,18 +106,12 @@ public class UpscalePopulationTest {
     private static void runOnce(String outputDirectory) {
         var configURL = IOUtils.extendUrl(ExamplesUtils.getTestScenarioURL("equil"), "config.xml");
         var config = ConfigUtils.loadConfig(configURL);
-        config.controler().setOutputDirectory(outputDirectory);
-        config.controler().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
-        config.controler().setLastIteration(0);
+        config.controller().setOutputDirectory(outputDirectory);
+        config.controller().setOverwriteFileSetting(OutputDirectoryHierarchy.OverwriteFileSetting.deleteDirectoryIfExists);
+        config.controller().setLastIteration(0);
         var scenario = ScenarioUtils.loadScenario(config);
 
         var controler = new Controler(scenario);
         controler.run();
-    }
-
-    @Test
-    public void prepareForSimWithEvents() {
-
-
     }
 }
